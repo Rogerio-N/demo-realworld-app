@@ -1,22 +1,22 @@
-FROM node:22-alpine
+FROM node:22-alpine AS builder
+
+LABEL stage="builder"
 
 WORKDIR /app
 
-COPY package.json .
-COPY yarn.lock .
-COPY tsconfig.json .
-COPY .env .
-COPY vite.config.ts .
-COPY tsconfig.tsnode.json .
-
-COPY backend/ backend/
-COPY data/ data/
-COPY public/ public/
-COPY scripts/ scripts/
-COPY src/ src/
-COPY build/ build/
+COPY . .
 
 RUN yarn install
+
+RUN yarn build
+
+FROM node:22-alpine AS main
+
+LABEL stage="main"
+
+WORKDIR /app
+
+COPY --from=builder /app/ .
 
 EXPOSE 3000
 EXPOSE 3001
