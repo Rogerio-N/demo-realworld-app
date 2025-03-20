@@ -10,7 +10,7 @@ RUN yarn install
 
 RUN yarn build
 
-FROM node:22-alpine AS main
+FROM node:22 AS main
 
 LABEL stage="main"
 
