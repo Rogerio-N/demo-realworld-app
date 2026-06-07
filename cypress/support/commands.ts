@@ -2,7 +2,7 @@
 ///<reference path="../global.d.ts" />
 
 import { pick } from "lodash/fp";
-import { format as formatDate } from "date-fns";
+import { differenceInMonths, parse as parseDate } from "date-fns";
 import { isMobile } from "./utils";
 
 // Import Cypress Percy plugin command (https://docs.percy.io/docs/cypress)
@@ -279,7 +279,30 @@ Cypress.Commands.add("pickDateRange", (startDate, endDate) => {
   });
 
   const selectDate = (date: Date) => {
-    return cy.get(`[data-date='${formatDate(date, "yyyy-MM-dd")}']`).click({ force: true });
+    const targetDay = date.getDate();
+
+    return cy
+      .get(".react-calendar__navigation__label")
+      .invoke("text")
+      .then((label: string) => {
+        const parsedDate = parseDate(label, "MMMM yyyy", new Date());
+        const monthsDiff = differenceInMonths(new Date(), parsedDate);
+
+        if (monthsDiff < 0) {
+          for (let i = 0; i < Math.abs(monthsDiff); i++) {
+            cy.get(".react-calendar__navigation__prev-button").click();
+          }
+        } else if (monthsDiff > 0) {
+          for (let i = 0; i < monthsDiff; i++) {
+            cy.get(".react-calendar__navigation__next-button").click();
+          }
+        }
+      })
+      .then(() => {
+        cy.get(".react-calendar__month-view__days__day")
+          .contains(new RegExp(`^${targetDay}$`))
+          .click({ force: true });
+      });
   };
 
   log.snapshot("before");
@@ -289,7 +312,7 @@ Cypress.Commands.add("pickDateRange", (startDate, endDate) => {
 
   // Open date range picker
   cy.getBySelLike("filter-date-range-button").click({ force: true });
-  cy.get(".Cal__Header__root").should("be.visible");
+  cy.get(".react-calendar").should("be.visible");
 
   // Select date range
   selectDate(startDate);
@@ -298,7 +321,7 @@ Cypress.Commands.add("pickDateRange", (startDate, endDate) => {
     log.end();
   });
 
-  cy.get(".Cal__Header__root").should("not.exist");
+  cy.get(".react-calendar").should("not.exist");
 });
 
 Cypress.Commands.add("database", (operation, entity, query, logTask = false) => {
@@ -328,38 +351,42 @@ Cypress.Commands.add("database", (operation, entity, query, logTask = false) => 
 Cypress.Commands.add("loginByGoogleApi", () => {
   cy.log("Logging in to Google");
 
-  cy.request({
-    method: "POST",
-    url: "https://www.googleapis.com/oauth2/v4/token",
-    body: {
-      grant_type: "refresh_token",
-      client_id: Cypress.env("googleClientId"),
-      client_secret: Cypress.env("googleClientSecret"),
-      refresh_token: Cypress.env("googleRefreshToken"),
-    },
-  }).then(({ body }) => {
-    const { access_token, id_token } = body;
-
-    cy.request({
-      method: "GET",
-      url: "https://www.googleapis.com/oauth2/v3/userinfo",
-      headers: { Authorization: `Bearer ${access_token}` },
-    }).then(({ body }) => {
-      cy.log(body);
-      const userItem = {
-        token: id_token,
-        user: {
-          googleId: body.sub,
-          email: body.email,
-          givenName: body.given_name,
-          familyName: body.family_name,
-          imageUrl: body.picture,
+  cy.task<{ clientSecret: string; refreshToken: string }>("getGoogleCredentials").then(
+    ({ clientSecret, refreshToken }) => {
+      cy.request({
+        method: "POST",
+        url: "https://www.googleapis.com/oauth2/v4/token",
+        body: {
+          grant_type: "refresh_token",
+          client_id: Cypress.env("googleClientId"),
+          client_secret: clientSecret,
+          refresh_token: refreshToken,
         },
-      };
+      }).then(({ body }) => {
+        const { access_token, id_token } = body;
 
-      window.localStorage.setItem("googleCypress", JSON.stringify(userItem));
+        cy.request({
+          method: "GET",
+          url: "https://www.googleapis.com/oauth2/v3/userinfo",
+          headers: { Authorization: `Bearer ${access_token}` },
+        }).then(({ body }) => {
+          cy.log(body);
+          const userItem = {
+            token: id_token,
+            user: {
+              googleId: body.sub,
+              email: body.email,
+              givenName: body.given_name,
+              familyName: body.family_name,
+              imageUrl: body.picture,
+            },
+          };
 
-      cy.visit("/");
-    });
-  });
+          window.localStorage.setItem("googleCypress", JSON.stringify(userItem));
+
+          cy.visit("/");
+        });
+      });
+    }
+  );
 });

@@ -10,9 +10,10 @@ import {
   TransactionAmountRangePayload,
   LikeNotification,
   CommentNotification,
+  ValuePiece,
 } from "../models";
 import { faker } from "@faker-js/faker";
-import Dinero from "dinero.js";
+import { dinero, toDecimal, add, subtract, isPositive, toSnapshot, USD } from "dinero.js";
 import {
   flow,
   get,
@@ -29,6 +30,10 @@ import {
   map,
   drop,
 } from "lodash/fp";
+import { parseISO } from "date-fns";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+
+const timezone = "UTC";
 
 export const isRequestTransaction = (transaction: Transaction) =>
   flow(get("requestStatus"), negate(isEmpty))(transaction);
@@ -52,33 +57,48 @@ export const getFakeAmount = (min: number = 1000, max: number = 50000) =>
   parseInt(faker.finance.amount(min, max), 10);
 
 /* istanbul ignore next */
-export const formatAmount = (amount: number) => Dinero({ amount }).toFormat();
+export const formatAmount = (amount: number) =>
+  toDecimal(dinero({ amount, currency: USD }), ({ value }) =>
+    Number(value).toLocaleString("en-US", { style: "currency", currency: "USD" })
+  );
 
 /* istanbul ignore next */
-export const formatAmountSlider = (amount: number) => Dinero({ amount }).toFormat("$0,0");
+export const formatAmountSlider = (amount: number) =>
+  toDecimal(dinero({ amount, currency: USD }), ({ value }) =>
+    Number(value).toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    })
+  );
 
 export const payAppDifference = curry((sender: User, transaction: Transaction) =>
-  Dinero({ amount: get("balance", sender) }).subtract(
-    Dinero({ amount: get("amount", transaction) })
+  subtract(
+    dinero({ amount: get("balance", sender) as number, currency: USD }),
+    dinero({ amount: get("amount", transaction) as number, currency: USD })
   )
 );
 
 export const payAppAddition = curry((sender: User, transaction: Transaction) =>
-  Dinero({ amount: get("balance", sender) }).add(Dinero({ amount: get("amount", transaction) }))
+  add(
+    dinero({ amount: get("balance", sender) as number, currency: USD }),
+    dinero({ amount: get("amount", transaction) as number, currency: USD })
+  )
 );
 
 export const getChargeAmount = (sender: User, transaction: Transaction) =>
-  Math.abs(payAppDifference(sender, transaction).getAmount());
+  Math.abs(toSnapshot(payAppDifference(sender, transaction)).amount);
 
 export const getTransferAmount = curry((sender: User, transaction: Transaction) =>
-  Math.abs(payAppDifference(sender, transaction).getAmount())
+  Math.abs(toSnapshot(payAppDifference(sender, transaction)).amount)
 );
 
 export const getPayAppCreditedAmount = (receiver: User, transaction: Transaction) =>
-  Math.abs(payAppAddition(receiver, transaction).getAmount());
+  Math.abs(toSnapshot(payAppAddition(receiver, transaction)).amount);
 
 export const hasSufficientFunds = (sender: User, transaction: Transaction) =>
-  payAppDifference(sender, transaction).isPositive();
+  isPositive(payAppDifference(sender, transaction));
 
 /* istanbul ignore next */
 export const receiverIsCurrentUser = (currentUser: User, transaction: Transaction) =>
@@ -181,12 +201,72 @@ export const getPaginatedItems = (page: number, limit: number, items: any) => {
   };
 };
 
+const getDateParts = (isoString: string) => {
+  const date = parseISO(isoString);
+  const day = Number(formatInTimeZone(date, timezone, "d"));
+  const month = Number(formatInTimeZone(date, timezone, "M")) - 1;
+  const year = Number(formatInTimeZone(date, timezone, "Y"));
+  const hour = Number(formatInTimeZone(date, timezone, "H"));
+  const minute = Number(formatInTimeZone(date, timezone, "m"));
+  const second = Number(formatInTimeZone(date, timezone, "s"));
+  const ms = Number(formatInTimeZone(date, timezone, "SSS"));
+  return { day, month, year, hour, minute, second, ms };
+};
+
+export function isoStringToLocalMidnightStart(isoString: string) {
+  const { year, month, day } = getDateParts(isoString);
+  return new Date(year, month, day, 0, 0, 0, 0);
+}
+
+export function isoStringToLocalMidnightEnd(isoString: string) {
+  const { year, month, day } = getDateParts(isoString);
+  return new Date(year, month, day, 23, 59, 59, 999);
+}
+
+export function isoStringToLocalDateFull(isoString: string): Date {
+  const { year, month, day, hour, minute, second, ms = 0 } = getDateParts(isoString);
+  return new Date(year, month, day, hour, minute, second, ms);
+}
+
+export function localDateToIsoString(date: Date): string {
+  return fromZonedTime(date, timezone).toISOString();
+}
+
+export function localDateToUTCISOString(localDate: ValuePiece) {
+  if (!(localDate instanceof Date)) return new Date().toISOString();
+  const utcDate = new Date(
+    Date.UTC(
+      localDate.getFullYear(),
+      localDate.getMonth(),
+      localDate.getDate(),
+      localDate.getHours(),
+      localDate.getMinutes(),
+      localDate.getSeconds(),
+      localDate.getMilliseconds()
+    )
+  );
+  return utcDate.toISOString();
+}
+
 // Custom UTC functions per:
 // https://github.com/date-fns/date-fns/issues/376#issuecomment-544274031
 // not used in application code
 /* istanbul ignore next */
-export const startOfDayUTC = (date: Date) => new Date(new Date(date).setUTCHours(0, 0, 0, 0));
+export const startOfDayUTC = (date: Date): Date => {
+  if (!(date instanceof Date)) date = new Date();
+  const utcDate = new Date(
+    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0)
+  );
 
+  return utcDate;
+};
 // not used in application code
 /* istanbul ignore next */
-export const endOfDayUTC = (date: Date) => new Date(new Date(date).setUTCHours(23, 59, 59, 999));
+export const endOfDayUTC = (date: Date): Date => {
+  if (!(date instanceof Date)) date = new Date();
+  const utcDate = new Date(
+    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999)
+  );
+
+  return utcDate;
+};

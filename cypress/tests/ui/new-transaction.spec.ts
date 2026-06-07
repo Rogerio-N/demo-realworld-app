@@ -1,4 +1,4 @@
-import Dinero from "dinero.js";
+import { dinero, toDecimal, USD } from "dinero.js";
 import { User } from "../../../src/models";
 import { isMobile } from "../../support/utils";
 
@@ -59,9 +59,10 @@ describe("New Transaction", function () {
       .should("be.visible")
       .and("have.text", "Transaction Submitted!");
 
-    const updatedAccountBalance = Dinero({
-      amount: ctx.user!.balance - parseInt(payment.amount) * 100,
-    }).toFormat();
+    const updatedAccountBalance = toDecimal(
+      dinero({ amount: ctx.user!.balance - parseInt(payment.amount) * 100, currency: USD }),
+      ({ value }) => Number(value).toLocaleString("en-US", { style: "currency", currency: "USD" })
+    );
 
     if (isMobile()) {
       cy.getBySel("sidenav-toggle").click();
@@ -76,7 +77,8 @@ describe("New Transaction", function () {
 
     cy.getBySelLike("create-another-transaction").click();
     cy.getBySel("app-name-logo").find("a").click();
-    cy.getBySelLike("personal-tab").click().should("have.class", "Mui-selected");
+    cy.getBySelLike("personal-tab").click();
+    cy.getBySelLike("personal-tab").should("have.class", "Mui-selected");
     cy.wait("@personalTransactions");
 
     cy.getBySel("transaction-list").first().should("contain", payment.description);
@@ -111,7 +113,8 @@ describe("New Transaction", function () {
     cy.visualSnapshot("Transaction Request Submitted Notification");
 
     cy.getBySelLike("return-to-transactions").click();
-    cy.getBySelLike("personal-tab").click().should("have.class", "Mui-selected");
+    cy.getBySelLike("personal-tab").click();
+    cy.getBySelLike("personal-tab").should("have.class", "Mui-selected");
 
     cy.getBySelLike("transaction-item").should("contain", request.description);
     cy.visualSnapshot("Transaction Item Description in List");
@@ -123,12 +126,16 @@ describe("New Transaction", function () {
 
     cy.getBySelLike("user-list-item").contains(ctx.contact!.firstName).click({ force: true });
 
-    cy.getBySelLike("amount-input").type("43").find("input").clear().blur();
+    cy.getBySelLike("amount-input").type("43");
+    cy.getBySelLike("amount-input").find("input").clear();
+    cy.getBySelLike("amount-input").find("input").blur();
     cy.get("#transaction-create-amount-input-helper-text")
       .should("be.visible")
       .and("contain", "Please enter a valid amount");
 
-    cy.getBySelLike("description-input").type("Fun").find("input").clear().blur();
+    cy.getBySelLike("description-input").type("Fun");
+    cy.getBySelLike("description-input").find("input").clear();
+    cy.getBySelLike("description-input").find("input").blur();
     cy.get("#transaction-create-description-input-helper-text")
       .should("be.visible")
       .and("contain", "Please enter a note");
@@ -179,9 +186,10 @@ describe("New Transaction", function () {
 
     cy.switchUserByXstate(ctx.contact!.username);
 
-    const updatedAccountBalance = Dinero({
-      amount: ctx.contact!.balance + transactionPayload.amount * 100,
-    }).toFormat();
+    const updatedAccountBalance = toDecimal(
+      dinero({ amount: ctx.contact!.balance + transactionPayload.amount * 100, currency: USD }),
+      ({ value }) => Number(value).toLocaleString("en-US", { style: "currency", currency: "USD" })
+    );
 
     if (isMobile()) {
       cy.getBySel("sidenav-toggle").click();
@@ -230,9 +238,10 @@ describe("New Transaction", function () {
 
     cy.switchUserByXstate(ctx.user!.username);
 
-    const updatedAccountBalance = Dinero({
-      amount: ctx.user!.balance + transactionPayload.amount * 100,
-    }).toFormat();
+    const updatedAccountBalance = toDecimal(
+      dinero({ amount: ctx.user!.balance + transactionPayload.amount * 100, currency: USD }),
+      ({ value }) => Number(value).toLocaleString("en-US", { style: "currency", currency: "USD" })
+    );
 
     if (isMobile()) {
       cy.getBySel("sidenav-toggle").click();

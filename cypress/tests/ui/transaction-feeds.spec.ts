@@ -1,4 +1,4 @@
-import Dinero from "dinero.js";
+import { dinero, toDecimal, USD } from "dinero.js";
 import {
   User,
   Transaction,
@@ -8,7 +8,13 @@ import {
   TransactionStatus,
 } from "../../../src/models";
 import { addDays, isWithinInterval, startOfDay } from "date-fns";
-import { startOfDayUTC, endOfDayUTC } from "../../../src/utils/transactionUtils";
+import {
+  endOfDayUTC,
+  isoStringToLocalMidnightStart,
+  isoStringToLocalMidnightEnd,
+  isoStringToLocalDateFull,
+  localDateToIsoString,
+} from "../../../src/utils/transactionUtils";
 import { isMobile } from "../../support/utils";
 
 const { _ } = Cypress;
@@ -73,7 +79,8 @@ describe("Transaction Feed", function () {
         cy.visualSnapshot("Mobile Home Link Side Navigation Not Visible");
 
         cy.getBySel("sidenav-toggle").click();
-        cy.getBySel("sidenav-home").click().should("not.exist");
+        cy.getBySel("sidenav-home").click();
+        cy.getBySel("sidenav-home").should("not.exist");
         cy.visualSnapshot("Mobile Toggle Side Navigation Not Visible");
       } else {
         cy.getBySel("sidenav-home").should("be.visible");
@@ -112,9 +119,11 @@ describe("Transaction Feed", function () {
           cy.log("🚩Testing a paid payment transaction item");
           cy.contains("[data-test*='transaction-item']", "paid").within(($el) => {
             const transaction = getTransactionFromEl($el);
-            const formattedAmount = Dinero({
-              amount: transaction.amount,
-            }).toFormat();
+            const formattedAmount = toDecimal(
+              dinero({ amount: transaction.amount, currency: USD }),
+              ({ value }) =>
+                Number(value).toLocaleString("en-US", { style: "currency", currency: "USD" })
+            );
 
             expect([TransactionStatus.pending, TransactionStatus.complete]).to.include(
               transaction.status
@@ -136,9 +145,11 @@ describe("Transaction Feed", function () {
           cy.log("🚩Testing a charged payment transaction item");
           cy.contains("[data-test*='transaction-item']", "charged").within(($el) => {
             const transaction = getTransactionFromEl($el);
-            const formattedAmount = Dinero({
-              amount: transaction.amount,
-            }).toFormat();
+            const formattedAmount = toDecimal(
+              dinero({ amount: transaction.amount, currency: USD }),
+              ({ value }) =>
+                Number(value).toLocaleString("en-US", { style: "currency", currency: "USD" })
+            );
 
             expect(TransactionStatus.complete).to.equal(transaction.status);
 
@@ -152,9 +163,11 @@ describe("Transaction Feed", function () {
           cy.log("🚩Testing a requested payment transaction item");
           cy.contains("[data-test*='transaction-item']", "requested").within(($el) => {
             const transaction = getTransactionFromEl($el);
-            const formattedAmount = Dinero({
-              amount: transaction.amount,
-            }).toFormat();
+            const formattedAmount = toDecimal(
+              dinero({ amount: transaction.amount, currency: USD }),
+              ({ value }) =>
+                Number(value).toLocaleString("en-US", { style: "currency", currency: "USD" })
+            );
 
             expect([TransactionStatus.pending, TransactionStatus.complete]).to.include(
               transaction.status
@@ -174,8 +187,8 @@ describe("Transaction Feed", function () {
 
     _.each(feedViews, (feed, feedName) => {
       it(`paginates ${feedName} transaction feed`, function () {
+        cy.getBySelLike(feed.tab).click();
         cy.getBySelLike(feed.tab)
-          .click()
           .should("have.class", "Mui-selected")
           .contains(feed.tabLabel, { matchCase: false })
           .should("have.css", { "text-transform": "uppercase" });
@@ -185,11 +198,6 @@ describe("Transaction Feed", function () {
         cy.wait(`@${feed.routeAlias}`)
           .its("response.body.results")
           .should("have.length", Cypress.env("paginationPageSize"));
-
-        // Temporary fix: https://github.com/cypress-io/cypress-realworld-app/issues/338
-        if (isMobile()) {
-          cy.wait(10);
-        }
 
         cy.log("📃 Scroll to next page");
         cy.getBySel("transaction-list").children().scrollTo("bottom");
@@ -219,10 +227,10 @@ describe("Transaction Feed", function () {
     if (isMobile()) {
       it("closes date range picker modal", () => {
         cy.getBySelLike("filter-date-range-button").click({ force: true });
-        cy.get(".Cal__Header__root").should("be.visible");
+        cy.get(".react-calendar").should("be.visible");
         cy.visualSnapshot("Mobile Open Date Range Picker");
         cy.getBySel("date-range-filter-drawer-close").click();
-        cy.get(".Cal__Header__root").should("not.exist");
+        cy.get(".react-calendar").should("not.exist");
         cy.visualSnapshot("Mobile Close Date Range Picker");
       });
     }
@@ -230,10 +238,13 @@ describe("Transaction Feed", function () {
     _.each(feedViews, (feed, feedName) => {
       it(`filters ${feedName} transaction feed by date range`, function () {
         cy.database("find", "transactions").then((transaction: Transaction) => {
-          const dateRangeStart = startOfDay(new Date(transaction.createdAt));
-          const dateRangeEnd = endOfDayUTC(addDays(dateRangeStart, 1));
+          const dateRangeStart = isoStringToLocalMidnightStart(`${transaction.createdAt}`);
+          const dateRangeEnd = isoStringToLocalMidnightEnd(
+            addDays(startOfDay(transaction.createdAt), 1).toISOString()
+          );
 
-          cy.getBySelLike(feed.tab).click().should("have.class", "Mui-selected");
+          cy.getBySelLike(feed.tab).click();
+          cy.getBySelLike(feed.tab).should("have.class", "Mui-selected");
 
           cy.wait(`@${feed.routeAlias}`).its("response.body.results").as("unfilteredResults");
 
@@ -245,16 +256,16 @@ describe("Transaction Feed", function () {
               cy.getBySelLike("transaction-item").should("have.length", transactions.length);
 
               transactions.forEach(({ createdAt }) => {
-                const createdAtDate = startOfDayUTC(new Date(createdAt));
+                const createdAtDate = isoStringToLocalDateFull(`${createdAt}`);
 
                 expect(
                   isWithinInterval(createdAtDate, {
-                    start: startOfDayUTC(dateRangeStart),
+                    start: dateRangeStart,
                     end: dateRangeEnd,
                   }),
-                  `transaction created date (${createdAtDate.toISOString()}) 
-                  is within ${dateRangeStart.toISOString()} 
-                  and ${dateRangeEnd.toISOString()}`
+                  `transaction created date (${localDateToIsoString(createdAtDate)})
+                  is within ${localDateToIsoString(dateRangeStart)}
+                  and ${localDateToIsoString(dateRangeEnd)}`
                 ).to.equal(true);
               });
 
@@ -277,7 +288,7 @@ describe("Transaction Feed", function () {
       });
 
       it(`does not show ${feedName} transactions for out of range date limits`, function () {
-        const dateRangeStart = startOfDay(new Date(2014, 1, 1));
+        const dateRangeStart = startOfDay(new Date(2025, 7, 1));
         const dateRangeEnd = endOfDayUTC(addDays(dateRangeStart, 1));
 
         cy.getBySelLike(feed.tab).click();
@@ -305,7 +316,8 @@ describe("Transaction Feed", function () {
 
     _.each(feedViews, (feed, feedName) => {
       it(`filters ${feedName} transaction feed by amount range`, function () {
-        cy.getBySelLike(feed.tab).click({ force: true }).should("have.class", "Mui-selected");
+        cy.getBySelLike(feed.tab).click({ force: true });
+        cy.getBySelLike(feed.tab).should("have.class", "Mui-selected");
 
         cy.wait(`@${feed.routeAlias}`).its("response.body.results").as("unfilteredResults");
 
@@ -340,9 +352,10 @@ describe("Transaction Feed", function () {
           cy.getBySel("amount-range-filter-drawer").should("not.exist");
         } else {
           cy.getBySel("transaction-list-filter-amount-clear-button").click();
+          cy.get(".MuiBackdrop-root").click();
+          cy.getBySel("transaction-list-filter-amount-range").should("not.exist");
           cy.getBySel("main").scrollTo("top");
           cy.getBySel("transaction-list-filter-date-range-button").click({ force: true });
-          cy.getBySel("transaction-list-filter-amount-range").should("not.be.visible");
         }
 
         cy.get("@unfilteredResults").then((unfilteredResults) => {
